@@ -10,22 +10,22 @@ use syn::{parse_macro_input, Expr, ExprArray, ExprLit, Ident, Lit, LitInt, Type}
 
 /// The Togens showing the pre-transposed matrix
 struct MatrixInput {
-    pub name: Ident,           // Variable identifier
-    pub height: usize,         // The number of rows
-    pub width: usize,          // The number of columns
-    pub values: Vec<Vec<u16>>, // The values in the matrix
+    pub name: Ident,                    // Variable identifier
+    pub target_height: usize,           // The number of rows
+    pub target_width: usize,            // The number of columns
+    pub incoming_values: Vec<Vec<u16>>, // The values in the matrix
 }
 
 struct Row {
-    entries: Punctuated<Expr, Token![,]>,
+    _entries: Punctuated<Expr, Token![,]>,
 }
 impl Parse for Row {
     fn parse(input: ParseStream) -> Result<Self> {
         let content;
         bracketed!(content in input);
-        let entries: Punctuated<Expr, Token![,]> =
+        let _entries: Punctuated<Expr, Token![,]> =
             content.parse_terminated(Expr::parse, Token![,])?;
-        Ok(Self { entries })
+        Ok(Self { _entries })
     }
 }
 
@@ -39,18 +39,21 @@ impl Parse for MatrixInput {
         input.parse::<Token![:]>()?;
 
         let parsed_type: Type = input.parse()?;
-        let (dtype, width, height) = match &parsed_type {
+        let (parsed_target_width, parsed_target_height) = match &parsed_type {
             Type::Array(row_array) => {
                 // You now have an ArrayType
-                let row_type: &Type = &*row_array.elem; // The type of the elements
+                let row_type: &Type = &row_array.elem; // The type of the elements
                 let height: &Expr = &row_array.len; // The length of the array (as an expression)
 
                 match row_type {
                     Type::Array(values_array) => {
                         // The inner type is also an ArrayType
                         let mat_dtype: &Type = &values_array.elem;
+                        if *mat_dtype != parsed_type {
+                            // return Err(syn::Error::new_spanned(row_array, "Values do not match type-annotation"));
+                        }
                         let width: &Expr = &values_array.len;
-                        (mat_dtype, width, height)
+                        (width, height)
 
                         // Now you have the type and length of the inner array
                     }
@@ -61,28 +64,28 @@ impl Parse for MatrixInput {
         };
 
         // Turn height and width into the int literals
-        let height = if let Expr::Lit(ExprLit {
+        let target_height = if let Expr::Lit(ExprLit {
             lit: Lit::Int(lit_int),
             ..
-        }) = height.clone()
+        }) = parsed_target_height.clone()
         {
             lit_int.base10_parse::<usize>()?
         } else {
             return Err(syn::Error::new_spanned(
-                height,
+                parsed_target_height,
                 "Expected an integer literal",
             ));
         };
 
-        let width = if let Expr::Lit(ExprLit {
+        let target_width = if let Expr::Lit(ExprLit {
             lit: Lit::Int(lit_int),
             ..
-        }) = width.clone()
+        }) = parsed_target_width.clone()
         {
             lit_int.base10_parse::<usize>()?
         } else {
             return Err(syn::Error::new_spanned(
-                width,
+                parsed_target_width,
                 "Expected an integer literal",
             ));
         };
@@ -97,31 +100,32 @@ impl Parse for MatrixInput {
         // Parse the row-values, they should be comma-separated arrays
         let rows: Punctuated<ExprArray, Comma> =
             content.parse_terminated(ExprArray::parse, Comma)?;
-        if rows.len() != height {
+        if rows.len() != target_width {
             return Err(syn::Error::new_spanned(
                 &rows,
-                format!("Expected {} elements", height),
+                format!("Expected {} rows", target_width),
             ));
         }
         let Some(fst) = rows.first() else {
             return Err(syn::Error::new_spanned(&rows, "Expected non-empty"));
         };
-        if fst.elems.len() != width {
+        if fst.elems.len() != target_height {
             return Err(syn::Error::new_spanned(
-                &fst,
-                format!("Expected {} elements", width),
+                fst,
+                format!("Expected {} elements per row", target_height),
             ));
         }
 
         let mut values = vec![];
         for expr_array in rows {
+            let mut row = vec![];
             for expr in expr_array.elems {
                 match &expr {
                     syn::Expr::Lit(syn::ExprLit {
                         lit: syn::Lit::Int(int),
                         ..
                     }) => {
-                        // It's an integer literal - do something with it
+                        row.push(int.base10_parse::<u16>()?);
                     }
                     _ => {
                         return Err(syn::Error::new_spanned(
@@ -131,14 +135,15 @@ impl Parse for MatrixInput {
                     }
                 }
             }
+            values.push(row);
         }
 
         // Return the parsed input
         Ok(MatrixInput {
             name,
-            height,
-            width,
-            values,
+            target_height,
+            target_width,
+            incoming_values: values,
         })
     }
 }
@@ -147,15 +152,16 @@ impl Parse for MatrixInput {
 pub fn transpose(input: TokenStream) -> TokenStream {
     let MatrixInput {
         name,
-        height,
-        width,
-        values,
+        target_height,
+        target_width,
+        incoming_values,
     } = parse_macro_input!(input as MatrixInput);
 
-    let mut transposed = vec![vec![0; height]; width];
-    for (i, row) in values.iter().enumerate() {
-        for (j, elem) in row.iter().enumerate(){
-            transposed[j][i] = values[i][j];
+    let mut transposed = vec![vec![0; target_width]; target_height];
+
+    for (i, incoming_row) in incoming_values.iter().enumerate() {
+        for (j, incoming_elem) in incoming_row.iter().enumerate() {
+            transposed[j][i] = *incoming_elem;
         }
     }
 
@@ -167,6 +173,6 @@ pub fn transpose(input: TokenStream) -> TokenStream {
     });
 
     TokenStream::from(quote! {
-        let #name: [[u16; #height]; #width] = [ #(#transposed_tokens),* ];
+        let #name: [[u16; #target_width]; #target_height] = [ #(#transposed_tokens),* ];
     })
 }
