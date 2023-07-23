@@ -12,10 +12,8 @@ struct MatrixInput {
     pub incoming_exprs: Vec<Vec<Expr>>, // The values in the matrix
 }
 
-
 impl Parse for MatrixInput {
     fn parse(input: ParseStream) -> Result<Self> {
-
         // pull out the bracket-content, i.e. the array expressions
         let content;
         let _ = bracketed!(content in input);
@@ -32,7 +30,6 @@ impl Parse for MatrixInput {
         if fst.elems.is_empty() {
             return Err(syn::Error::new_spanned(&fst, "Expected a non-empty matrix"));
         }
-
 
         let mut matrix = vec![];
         for expr_array in rows {
@@ -52,19 +49,20 @@ impl Parse for MatrixInput {
 
 #[proc_macro]
 pub fn transpose(input: TokenStream) -> TokenStream {
-    let MatrixInput {
-        incoming_exprs,
-    } = parse_macro_input!(input as MatrixInput);
+    let MatrixInput { incoming_exprs } = parse_macro_input!(input as MatrixInput);
 
     // Post-parsing check
     if incoming_exprs.is_empty() || incoming_exprs[0].is_empty() {
-        let error = syn::Error::new(proc_macro2::Span::call_site(), "The input matrix should not be empty");
+        let error = syn::Error::new(
+            proc_macro2::Span::call_site(),
+            "The input matrix should not be empty",
+        );
         let compile_error = error.to_compile_error();
         return compile_error.into();
     }
 
     let mut still_sym = incoming_exprs.len() == incoming_exprs[0].len();
-    let mut transposed = vec![vec![] ; incoming_exprs[0].len()];
+    let mut transposed = vec![vec![]; incoming_exprs[0].len()];
     for (i, incoming_row) in incoming_exprs.iter().enumerate() {
         for (j, incoming_elem) in incoming_row.iter().enumerate() {
             if still_sym && incoming_exprs[i][j].ne(&incoming_exprs[j][i]) {
@@ -77,15 +75,18 @@ pub fn transpose(input: TokenStream) -> TokenStream {
     }
 
     if still_sym {
-        return syn::Error::new(proc_macro2::Span::call_site(), "Uneccisary transpose: Matrix is symmetrical").to_compile_error().into();
+        return syn::Error::new(
+            proc_macro2::Span::call_site(),
+            "Uneccisary transpose: Matrix is symmetrical",
+        )
+        .to_compile_error()
+        .into();
     }
 
     let transposed_tokens = transposed.into_iter().map(|row| {
-        let elems = row
-            .into_iter();
+        let elems = row.into_iter();
         quote! { [ #(#elems),* ] }
     });
-
 
     TokenStream::from(quote! {
          [ #(#transposed_tokens),* ]
