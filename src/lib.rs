@@ -4,41 +4,35 @@ use quote::quote;
 use syn::parse::{Parse, ParseStream};
 use syn::punctuated::Punctuated;
 use syn::token::Comma;
-use syn::{bracketed, Result, Token};
+use syn::{bracketed, Result};
 use syn::{parse_macro_input, Expr, ExprArray};
 
-/// The Togens showing the pre-transposed matrix
+/// Parses the tokens for an array of an array of expressions into manupilable vec
 struct MatrixInput {
     pub incoming_exprs: Vec<Vec<Expr>>, // The values in the matrix
 }
 
-struct Row {
-    _entries: Punctuated<Expr, Token![,]>,
-}
-impl Parse for Row {
-    fn parse(input: ParseStream) -> Result<Self> {
-        let content;
-        bracketed!(content in input);
-        let _entries: Punctuated<Expr, Token![,]> =
-            content.parse_terminated(Expr::parse, Token![,])?;
-        Ok(Self { _entries })
-    }
-}
 
 impl Parse for MatrixInput {
-    // varname: [TargetType ; WIDTH] ; HEIGHt] = <pre-transposed>
     fn parse(input: ParseStream) -> Result<Self> {
 
-        // Parse the array values
+        // pull out the bracket-content, i.e. the array expressions
         let content;
-        let _ = bracketed!(content in input); // Get the content within the brackets
+        let _ = bracketed!(content in input);
 
-        // Parse the row-values, they should be comma-separated arrays
+        // We are expecting a standard array-array syntax: comma-separated brackets, each
+        // containyng a series of expressions
         let rows: Punctuated<ExprArray, Comma> =
             content.parse_terminated(ExprArray::parse, Comma)?;
-        let Some(_) = rows.first() else {
-            return Err(syn::Error::new_spanned(&rows, "Expected non-empty"));
+
+        // Error-at-compile-time if we try transposing something empty
+        let Some(fst) = rows.first() else {
+            return Err(syn::Error::new_spanned(&rows, "Expected a non-empty matrix"));
         };
+        if fst.elems.is_empty() {
+            return Err(syn::Error::new_spanned(&fst, "Expected a non-empty matrix"));
+        }
+
 
         let mut matrix = vec![];
         for expr_array in rows {
@@ -62,15 +56,30 @@ pub fn transpose(input: TokenStream) -> TokenStream {
         incoming_exprs,
     } = parse_macro_input!(input as MatrixInput);
 
+    // Post-parsing check
+    if incoming_exprs.is_empty() || incoming_exprs[0].is_empty() {
+        let error = syn::Error::new(proc_macro2::Span::call_site(), "The input matrix should not be empty");
+        let compile_error = error.to_compile_error();
+        return compile_error.into();
+    }
 
+    let mut still_sym = incoming_exprs.len() == incoming_exprs[0].len();
     let mut transposed = vec![vec![] ; incoming_exprs[0].len()];
-    for incoming_row in incoming_exprs.iter() {
+    for (i, incoming_row) in incoming_exprs.iter().enumerate() {
         for (j, incoming_elem) in incoming_row.iter().enumerate() {
+            if still_sym && incoming_exprs[i][j].ne(&incoming_exprs[j][i]) {
+                dbg!(i, j, "not sym");
+                still_sym = false;
+            }
+
             transposed[j].push(incoming_elem);
         }
     }
 
-    dbg!(&transposed);
+    if still_sym {
+        return syn::Error::new(proc_macro2::Span::call_site(), "Uneccisary transpose: Matrix is symmetrical").to_compile_error().into();
+    }
+
     let transposed_tokens = transposed.into_iter().map(|row| {
         let elems = row
             .into_iter();
@@ -79,6 +88,6 @@ pub fn transpose(input: TokenStream) -> TokenStream {
 
 
     TokenStream::from(quote! {
-         [ #(#transposed_tokens),* ];
+         [ #(#transposed_tokens),* ]
     })
 }
