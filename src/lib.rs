@@ -28,7 +28,7 @@ impl Parse for MatrixInput {
             return Err(syn::Error::new_spanned(&rows, "Expected a non-empty matrix"));
         };
         if fst.elems.is_empty() {
-            return Err(syn::Error::new_spanned(&fst, "Expected a non-empty matrix"));
+            return Err(syn::Error::new_spanned(fst, "Expected a non-empty matrix"));
         }
 
         let mut matrix = vec![];
