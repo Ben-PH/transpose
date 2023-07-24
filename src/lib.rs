@@ -69,7 +69,6 @@ pub fn transpose(input: TokenStream) -> TokenStream {
     for (i, incoming_row) in incoming_exprs.iter().enumerate() {
         for (j, incoming_elem) in incoming_row.iter().enumerate() {
             if still_sym && incoming_exprs[i][j].ne(&incoming_exprs[j][i]) {
-                dbg!(i, j, "not sym");
                 still_sym = false;
             }
 
